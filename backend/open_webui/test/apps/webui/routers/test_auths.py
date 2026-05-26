@@ -194,3 +194,36 @@ class TestAuths(AbstractPostgresTest):
             response = self.fast_api_client.get(self.create_url('/api_key'))
         assert response.status_code == 200
         assert response.json() == {'api_key': 'abc'}
+
+    def test_expired_jwt_token_rejection(self):
+        import asyncio
+        from datetime import timedelta
+        from open_webui.utils.auth import create_token, decode_token
+
+        user = asyncio.run(
+            self.auths.insert_new_auth(
+                email='expired.user@openwebui.com',
+                password='password123',
+                name='Expired User',
+                profile_image_url='/user.png',
+                role='user',
+            )
+        )
+
+        expired_token = create_token(
+            data={'id': user.id, 'email': 'expired.user@openwebui.com'},
+            expires_delta=timedelta(hours=-1),
+        )
+        # Verify the utility function correctly identifies the expiration
+        assert decode_token(expired_token) is None
+
+        self.fast_api_client.cookies.clear()
+
+        # Attempt to access a protected route with the expired token
+        response = self.fast_api_client.get(
+            self.create_url(''),
+            headers={'Authorization': f'Bearer {expired_token}'},
+        )
+
+        assert response.status_code == 401
+        assert 'detail' in response.json()
